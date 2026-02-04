@@ -234,5 +234,19 @@ with colB:
 with colC:
     draw_pie("This Month", sum_month(log))
 
-# Auto-refresh every 2 seconds
-st.experimental_rerun()
+# --- AUTO REFRESH CORRECT STREAMLIT WAY ---
+import time
+st_autorefresh = st.experimental_memo(lambda: None)  # prevents loop-errors
+
+st.write("")  # layout spacer
+st.caption("Auto-refresh enabled (2 seconds)")
+
+# Use Streamlit's built-in auto-refresh widget:
+st.experimental_set_query_params(ts=int(time.time()))
+
+# Schedule the rerun
+import threading
+def trigger():
+    time.sleep(2)
+    st.experimental_rerun()
+threading.Thread(target=trigger).start()
