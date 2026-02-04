@@ -1,0 +1,336 @@
+import customtkinter as ctk
+from datetime import datetime, timedelta
+import matplotlib
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+import json
+import os
+
+# ---------- App Setup ----------
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("green")
+
+root = ctk.CTk()
+root.attributes("-fullscreen", True)
+
+def exit_fullscreen(event=None):
+    root.attributes("-fullscreen", False)
+
+root.bind("<Escape>", exit_fullscreen)
+
+# ---------- MAIN WRAPPER ----------
+main = ctk.CTkFrame(root, fg_color="#2f2f2f")
+main.pack(expand=True, fill="both")
+
+# ---------- STATUS BUTTON ----------
+status_knapp = ctk.CTkButton(
+    main,
+    text="Up time",
+    font=ctk.CTkFont(size=40, weight="bold"),
+    width=500,
+    height=120,
+    corner_radius=20,
+    fg_color="#005A08",
+    text_color="#FFFFFF",
+    hover_color="#005A08",
+    border_width=3,
+    border_color="#000000",
+)
+status_knapp.pack(pady=(30, 10))
+status_knapp.pack_propagate(False)
+
+# ---------- LOGIC ----------
+LOGG_FIL = "statuslog.txt"
+ALLE_STATUS = ["Up time", "Minor issue", "Warning", "Alarm", "Urgent"]
+
+OLD_TO_NEW = {
+    "Idle": "Up time",
+    "Ingen aktiv status": "Up time",
+    "No issues": "Up time",
+}
+
+FARGER = {
+    "Up time": "#005A08",
+    "Minor issue": "#97D801",
+    "Warning": "#E7AA00",
+    "Alarm": "#D62400",
+    "Urgent": "#AA00B9",
+}
+
+aktiv = "Up time"
+start_tid = datetime.now()
+
+REFRESH_MS = 2000
+
+
+def skriv_til_fil(t):
+    with open(LOGG_FIL, "a") as f:
+        f.write(t + "\n")
+
+
+def logg_periode(statusnavn, start_dt, slutt_dt):
+    statusnavn = OLD_TO_NEW.get(statusnavn, statusnavn)
+    linje = (
+        f"{statusnavn}, Start: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}, "
+        f"Slutt: {slutt_dt.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    skriv_til_fil(linje)
+
+
+def les_logg():
+    if not os.path.exists(LOGG_FIL):
+        return []
+    data = []
+    with open(LOGG_FIL, "r") as f:
+        for line in f:
+            if "Start:" in line and "Slutt:" in line:
+                try:
+                    statuspart, s_part, e_part = line.split(",")
+                    navn = OLD_TO_NEW.get(statuspart.strip(), statuspart.strip())
+                    s = datetime.strptime(s_part.replace("Start:", "").strip(), "%Y-%m-%d %H:%M:%S")
+                    e = datetime.strptime(e_part.replace("Slutt:", "").strip(), "%Y-%m-%d %H:%M:%S")
+                    data.append((navn, s, e))
+                except:
+                    pass
+    return data
+
+
+def _with_active_now(logg):
+    return logg + [(aktiv, start_tid, datetime.now())]
+
+
+def sum_day(logg):
+    totals = {k: 0 for k in ALLE_STATUS}
+    today = datetime.now().date()
+    for navn, s, e in logg:
+        navn = OLD_TO_NEW.get(navn, navn)
+        if navn in totals and s.date() == today:
+            totals[navn] += (e - s).seconds
+    return totals
+
+
+def sum_week(logg):
+    totals = {k: 0 for k in ALLE_STATUS}
+    today = datetime.now().date()
+    monday = today - timedelta(days=today.weekday())
+    for navn, s, e in logg:
+        navn = OLD_TO_NEW.get(navn, navn)
+        if navn in totals and s.date() >= monday:
+            totals[navn] += (e - s).seconds
+    return totals
+
+
+def sum_month(logg):
+    totals = {k: 0 for k in ALLE_STATUS}
+    now = datetime.now()
+    mstart = datetime(now.year, now.month, 1).date()
+    for navn, s, e in logg:
+        navn = OLD_TO_NEW.get(navn, navn)
+        if navn in totals and s.date() >= mstart:
+            totals[navn] += (e - s).seconds
+    return totals
+
+
+# ---------- PIEWIDGET v5 (stable chips + circle border + no glitches) ----------
+class PieWidget:
+    def __init__(self, frame, title):
+        self.frame = frame
+        self.title = title
+
+        self.title_label = ctk.CTkLabel(
+            frame, text=title,
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="white")
+        self.title_label.pack(pady=(8, 4))
+
+        self.chips_wrap = ctk.CTkFrame(frame, fg_color="#2f2f2f", height=35)
+        self.chips_wrap.pack_propagate(False)
+        self.chips_wrap.pack(pady=(0, 4))
+
+        self.chips_row = ctk.CTkFrame(self.chips_wrap, fg_color="#2f2f2f")
+        self.chips_row.pack()
+
+        self.chip_labels = {}
+        for s in ALLE_STATUS:
+            lbl = ctk.CTkLabel(
+                self.chips_row,
+                text="",
+                width=40,
+                text_color=FARGER[s],
+                font=ctk.CTkFont(size=14, weight="bold"),
+                anchor="center")
+            lbl.pack(side="left", padx=3)
+            self.chip_labels[s] = lbl
+
+        self.fig, self.ax = plt.subplots(figsize=(6.5, 4.5), facecolor="#2f2f2f")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=frame)
+        self.canvas.get_tk_widget().pack(pady=4)
+
+    def draw(self, totals):
+        tot = sum(totals.values())
+
+        if tot == 0:
+            first = True
+            for s, lbl in self.chip_labels.items():
+                if first:
+                    lbl.configure(text="0%", text_color="#BBBBBB")
+                    first = False
+                else:
+                    lbl.configure(text="", text_color=FARGER[s])
+        else:
+            for s, lbl in self.chip_labels.items():
+                v = totals.get(s, 0)
+                if v > 0:
+                    pct = round((v / tot) * 100)
+                    lbl.configure(text=f"{pct}%")
+                else:
+                    lbl.configure(text="")
+
+        self.ax.clear()
+        self.ax.set_facecolor("#2f2f2f")
+
+        labels, sizes, colors = [], [], []
+        for s in ALLE_STATUS:
+            if totals.get(s, 0) > 0:
+                labels.append(s)
+                sizes.append(totals[s])
+                colors.append(FARGER[s])
+
+        if sizes:
+            wedges, _ = self.ax.pie(
+                sizes, labels=labels,
+                colors=colors,
+                textprops={"color": "white", "weight": "bold"},
+                wedgeprops={"linewidth": 2, "edgecolor": "#000000"},
+            )
+        else:
+            self.ax.text(0.5,0.5,"No data",ha="center",color="white")
+
+        # --- BLACK OUTLINE AROUND ENTIRE PIE ---
+        circle = plt.Circle((0, 0), 1.0, fill=False, edgecolor="black", linewidth=2, zorder=10)
+        self.ax.add_artist(circle)
+
+        self.ax.axis("equal")
+        self.canvas.draw_idle()
+
+
+# ---------- DIAGRAM SECTION ----------
+InfoFrame = ctk.CTkFrame(main, fg_color="#2f2f2f")
+InfoFrame.pack(padx=20, pady=20)
+
+def make_clean(master):
+    f = ctk.CTkFrame(master, fg_color="#2f2f2f", width=460, height=580)
+    f.pack_propagate(False)
+    return f
+
+DayFrame = make_clean(InfoFrame)
+WeekFrame = make_clean(InfoFrame)
+MonthFrame = make_clean(InfoFrame)
+
+DayFrame.pack(side="left", padx=20)
+WeekFrame.pack(side="left", padx=20)
+MonthFrame.pack(side="left", padx=20)
+
+dayPie = PieWidget(DayFrame, "Today")
+weekPie = PieWidget(WeekFrame, "This Week")
+monthPie = PieWidget(MonthFrame, "This Month")
+
+
+def oppdater_alle_diagrammer():
+    base = les_logg()
+    full = _with_active_now(base)
+    dayPie.draw(sum_day(full))
+    weekPie.draw(sum_week(full))
+    monthPie.draw(sum_month(full))
+
+
+# ---------- AUTO REFRESH LOOP ----------
+def start_refresh():
+    def tick():
+        oppdater_alle_diagrammer()
+        root.after(REFRESH_MS, tick)
+    root.after(REFRESH_MS, tick)
+
+
+# ---------- BUTTONS (fixed holders, non-glitch) ----------
+buttonsframe = ctk.CTkFrame(main, fg_color="#2f2f2f")
+buttonsframe.pack(pady=40)
+
+def bytt_status(ny, chk):
+    global aktiv, start_tid
+    nå = datetime.now()
+    logg_periode(aktiv, start_tid, nå)
+
+    aktiv = ny
+    start_tid = nå
+
+    status_knapp.configure(
+        text=ny,
+        fg_color=FARGER[ny],
+        text_color="#FFFFFF"
+    )
+
+    show_only(chk)
+    oppdater_alle_diagrammer()
+
+def aktiver(s, c): bytt_status(s, c)
+def deaktiver():   bytt_status("Up time", None)
+
+def make_btn(master, text, color, cmd):
+    return ctk.CTkButton(
+        master, text=text, width=300, height=300,
+        font=ctk.CTkFont(size=30, weight="bold"),
+        fg_color=color, hover_color=color,
+        corner_radius=20, border_width=3, border_color="#000000",
+        command=cmd
+    )
+
+def make_holder(master):
+    f = ctk.CTkFrame(master, fg_color="#2f2f2f", width=90, height=90)
+    f.pack_propagate(False)
+    f.pack()
+    return f
+
+def make_check(master):
+    return ctk.CTkButton(
+        master, text="V",
+        width=80, height=80,
+        font=ctk.CTkFont(size=35, weight="bold"),
+        fg_color="#2f2f2f", text_color="#4FAA04",
+        corner_radius=20, border_width=3, border_color="#000000",
+        command=deaktiver
+    )
+
+
+# Minor
+MF = ctk.CTkFrame(buttonsframe, fg_color="#2f2f2f"); MF.pack(side="left", padx=20)
+MB = make_btn(MF, "Minor issue", "#97D801", lambda: aktiver("Minor issue", MC)); MB.pack(pady=(10, 4))
+MH = make_holder(MF); MC = make_check(MH)
+
+# Warning
+WF = ctk.CTkFrame(buttonsframe, fg_color="#2f2f2f"); WF.pack(side="left", padx=20)
+WB = make_btn(WF, "Warning", "#E7AA00", lambda: aktiver("Warning", WC)); WB.pack(pady=(10, 4))
+WH = make_holder(WF); WC = make_check(WH)
+
+# Alarm
+AF = ctk.CTkFrame(buttonsframe, fg_color="#2f2f2f"); AF.pack(side="left", padx=20)
+AB = make_btn(AF, "Alarm", "#D62400", lambda: aktiver("Alarm", AC)); AB.pack(pady=(10, 4))
+AH = make_holder(AF); AC = make_check(AH)
+
+# Urgent
+UF = ctk.CTkFrame(buttonsframe, fg_color="#2f2f2f"); UF.pack(side="left", padx=20)
+UB = make_btn(UF, "Urgent", "#AA00B9", lambda: aktiver("Urgent", UC)); UB.pack(pady=(10, 4))
+UH = make_holder(UF); UC = make_check(UH)
+
+all_check = [MC, WC, AC, UC]
+
+def show_only(btn):
+    for b in all_check:
+        b.pack_forget()
+    if btn:
+        btn.pack()
+
+# -------------- START ------------
+oppdater_alle_diagrammer()
+start_refresh()
+root.mainloop()
