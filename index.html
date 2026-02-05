@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Emils enkle app</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <main class="container">
+    <h1>Emils app</h1>
+
+    <label for="value">Skriv inn et tall:</label>
+    <input id="value" type="number" step="any" placeholder="f.eks. 12.5">
+
+    <button id="sendBtn">Kjør</button>
+
+    <div id="output" class="output"></div>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
