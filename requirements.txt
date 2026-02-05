@@ -1,5 +1,1 @@
-streamlit
-matplotlib
-numpy
-requests
-streamlit-autorefresh
+Flask==3.0.0
